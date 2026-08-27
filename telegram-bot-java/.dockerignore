@@ -1,0 +1,11 @@
+src/
+gradle/
+gradlew
+gradlew.bat
+build.gradle
+settings.gradle
+gradle.properties
+.gradle/
+build/generated/
+build/classes/
+build/tmp/

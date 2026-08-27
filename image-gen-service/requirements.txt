@@ -1,0 +1,8 @@
+fastapi==0.115.*
+uvicorn[standard]==0.32.*
+diffusers==0.31.*
+transformers==4.45.*
+Pillow==10.*
+accelerate==0.34.*
+deep-translator==1.11.*
+peft>=0.12.0

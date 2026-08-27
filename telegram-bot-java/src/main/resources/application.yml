@@ -1,0 +1,4 @@
+bot:
+  token: ${TELEGRAM_BOT_TOKEN}
+  whisper-url: ${WHISPER_SERVICE_URL:http://whisper-service:8000/transcribe}
+  image-gen-url: ${IMAGE_GEN_SERVICE_URL:http://image-gen-service:8001/generate}

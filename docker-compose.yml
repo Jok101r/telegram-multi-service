@@ -1,0 +1,43 @@
+version: "3.8"
+
+services:
+  whisper-service:
+    # https://github.com/openai/whisper
+    build: ./whisper-service
+    environment:
+      - WHISPER_MODEL=small   # tiny/base/small/medium/large-v3/distil-large-v3
+      - WHISPER_DEVICE=cpu    # cpu or cuda (if a GPU runner is available)
+      - WHISPER_COMPUTE_TYPE=int8  # int8 (fast on CPU) / float16 (for GPU)
+    volumes:
+      - whisper-cache:/root/.cache/huggingface   # faster-whisper caches models via huggingface_hub
+    restart: unless-stopped
+
+  image-gen-service:
+    # Image generation via Stable Diffusion v1.5 (Apache 2.0)
+    # IMAGE_MODEL can be replaced with "Lykon/dreamshaper-8" or "SG161222/Realistic_Vision_V5.1"
+    build: ./image-gen-service
+    environment:
+      - IMAGE_MODEL=Lykon/dreamshaper-8
+      - IMAGE_LORA=latent-consistency/lcm-lora-sdv1-5
+      - IMAGE_STEPS=8
+      - IMAGE_GUIDANCE_SCALE=1.5
+      - IMAGE_WIDTH=512
+      - IMAGE_HEIGHT=512
+    volumes:
+      - image-gen-cache:/root/.cache/huggingface   # model cache (~4 GB)
+    restart: unless-stopped
+
+  telegram-bot:
+    build: ./telegram-bot-java
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - WHISPER_SERVICE_URL=http://whisper-service:8000/transcribe
+      - IMAGE_GEN_SERVICE_URL=http://image-gen-service:8001/generate
+    depends_on:
+      - whisper-service
+      - image-gen-service
+    restart: unless-stopped
+
+volumes:
+  whisper-cache:
+  image-gen-cache:
