@@ -1,0 +1,39 @@
+.env
+.env.*
+!.env.example
+
+# Java
+telegram-bot-java/.gradle/
+telegram-bot-java/build/
+telegram-bot-java/bin/
+*.class
+*.jar
+!gradle/wrapper/*.jar
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+
+# Docker
+docker-compose.override.yml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cookies (anti-ban, may contain auth tokens)
+cookies.txt
+
+# Logs
+*.log
