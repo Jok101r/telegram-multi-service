@@ -39,6 +39,16 @@ public class VoiceBot implements LongPollingSingleThreadUpdateConsumer {
         if (update.hasCallbackQuery()) {
             CallbackQuery callback = update.getCallbackQuery();
             CallbackHandler handler = callbackHandlers.get(callback.getData());
+            // Prefix matching for dynamic callbacks (e.g. "vdl:720p" matches "vdl:")
+            if (handler == null) {
+                for (var entry : callbackHandlers.entrySet()) {
+                    if (callback.getData().startsWith(entry.getKey())
+                            && !entry.getKey().equals(callback.getData())) {
+                        handler = entry.getValue();
+                        break;
+                    }
+                }
+            }
             if (handler != null) handler.handle(callback);
             return;
         }

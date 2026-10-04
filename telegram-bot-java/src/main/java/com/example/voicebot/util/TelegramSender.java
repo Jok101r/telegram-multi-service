@@ -4,7 +4,9 @@ import com.example.voicebot.session.UserSessionService;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
+import org.telegram.telegrambots.meta.api.methods.send.SendVideo;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.objects.InputFile;
 import org.telegram.telegrambots.meta.api.objects.message.Message;
@@ -69,6 +71,36 @@ public class TelegramSender {
             Message sent = telegramClient.execute(SendPhoto.builder()
                     .chatId(chatId)
                     .photo(photo)
+                    .caption(safeCaption)
+                    .build());
+            sessionService.trackMessage(chatId, sent.getMessageId());
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void sendVideo(Long chatId, byte[] videoBytes, String filename, String caption) {
+        try {
+            InputFile video = new InputFile(new ByteArrayInputStream(videoBytes), filename);
+            String safeCaption = caption.length() > 1024 ? caption.substring(0, 1021) + "..." : caption;
+            Message sent = telegramClient.execute(SendVideo.builder()
+                    .chatId(chatId)
+                    .video(video)
+                    .caption(safeCaption)
+                    .build());
+            sessionService.trackMessage(chatId, sent.getMessageId());
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void sendDocument(Long chatId, byte[] docBytes, String filename, String caption) {
+        try {
+            InputFile doc = new InputFile(new ByteArrayInputStream(docBytes), filename);
+            String safeCaption = caption.length() > 1024 ? caption.substring(0, 1021) + "..." : caption;
+            Message sent = telegramClient.execute(SendDocument.builder()
+                    .chatId(chatId)
+                    .document(doc)
                     .caption(safeCaption)
                     .build());
             sessionService.trackMessage(chatId, sent.getMessageId());

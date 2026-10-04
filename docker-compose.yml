@@ -27,17 +27,36 @@ services:
       - image-gen-cache:/root/.cache/huggingface   # model cache (~4 GB)
     restart: unless-stopped
 
+  video-dl-service:
+    build: ./video-dl-service
+    ports:
+      - "8002:8002"                 # exposed for direct download links (files > 50 MB)
+    environment:
+      - RATE_LIMIT_DELAY=5          # seconds between requests (anti-ban)
+      - PROXY_URL=                  # optional: socks5://host:port or http://host:port
+      - COOKIES_FILE=               # optional: /cookies/cookies.txt
+      - PUBLIC_URL=http://localhost:8002  # public URL for download links (change to your server IP/domain)
+      - FILE_TTL_SECONDS=600        # how long download links stay valid (10 min)
+    volumes:
+      - video-dl-cache:/root/.cache
+    tmpfs:
+      - /tmp:size=2G               # temp storage for large video downloads
+    restart: unless-stopped
+
   telegram-bot:
     build: ./telegram-bot-java
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - WHISPER_SERVICE_URL=http://whisper-service:8000/transcribe
       - IMAGE_GEN_SERVICE_URL=http://image-gen-service:8001/generate
+      - VIDEO_DL_SERVICE_URL=http://video-dl-service:8002
     depends_on:
       - whisper-service
       - image-gen-service
+      - video-dl-service
     restart: unless-stopped
 
 volumes:
   whisper-cache:
   image-gen-cache:
+  video-dl-cache:

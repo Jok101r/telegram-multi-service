@@ -13,6 +13,7 @@ public class UserSessionService {
 
     private final Map<Long, UserState> states = new ConcurrentHashMap<>();
     private final Map<Long, List<Integer>> messageIds = new ConcurrentHashMap<>();
+    private final Map<Long, String> videoUrls = new ConcurrentHashMap<>();
 
     public UserState getState(Long chatId) {
         return states.getOrDefault(chatId, UserState.IDLE);
@@ -29,5 +30,13 @@ public class UserSessionService {
     public List<Integer> popMessageIds(Long chatId) {
         List<Integer> ids = messageIds.remove(chatId);
         return ids != null ? new ArrayList<>(ids) : Collections.emptyList();
+    }
+
+    public void setVideoUrl(Long chatId, String url) {
+        videoUrls.put(chatId, url);
+    }
+
+    public String getVideoUrl(Long chatId) {
+        return videoUrls.remove(chatId);
     }
 }

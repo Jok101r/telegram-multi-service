@@ -8,6 +8,7 @@ A locally-running Telegram bot with AI features, powered by Docker Compose.
 |--------|-------------|
 | 🎙 Audio to text | Transcribes voice messages and audio files (Faster-Whisper) |
 | 🖼 Generate image from prompt | Generates an image from a text description (Stable Diffusion v1.5) |
+| 📹 Download video | Downloads videos from YouTube and VK in selectable quality (yt-dlp) |
 | /clear | Deletes all messages in the current chat |
 
 ## Architecture
@@ -16,7 +17,8 @@ A locally-running Telegram bot with AI features, powered by Docker Compose.
 telegram-bot-java/       — Spring Boot bot (Java 21)
 whisper-service/         — FastAPI transcription service (faster-whisper)
 image-gen-service/       — FastAPI image generation service (diffusers + SD v1.5)
-docker-compose.yml       — orchestrates all three services
+video-dl-service/        — FastAPI video download service (yt-dlp + FFmpeg)
+docker-compose.yml       — orchestrates all four services
 ```
 
 All services communicate over an internal Docker network. The bot does not expose any external ports.
@@ -80,7 +82,7 @@ When `Model loaded successfully.` appears in the logs, the service is ready.
 docker compose ps
 ```
 
-All three services should show status `Up`.
+All four services should show status `Up`.
 
 ## Configuration
 
@@ -111,6 +113,17 @@ Alternative models (replace `IMAGE_MODEL`):
 - `Lykon/dreamshaper-8` — better overall quality
 - `SG161222/Realistic_Vision_V5.1` — photorealism
 - `prompthero/openjourney-v4` — artistic style (midjourney-like)
+
+**video-dl-service:**
+| Variable | Default | Note |
+|---|---|---|
+| `RATE_LIMIT_DELAY` | `5` | Seconds between requests (anti-ban) |
+| `PROXY_URL` | _(empty)_ | Optional: `socks5://host:port` or `http://host:port` |
+| `COOKIES_FILE` | _(empty)_ | Optional: path to cookies.txt for authenticated content |
+
+Files up to **50 MB** are sent directly in Telegram. Larger files are served as a temporary download link (valid for 10 minutes by default).
+
+To use download links on a remote server, update `PUBLIC_URL` to your server's address (e.g., `http://your-server:8002`).
 
 ## Updating the bot after code changes
 

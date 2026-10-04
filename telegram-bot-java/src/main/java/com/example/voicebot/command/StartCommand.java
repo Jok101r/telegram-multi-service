@@ -41,6 +41,12 @@ public class StartCommand implements Command {
                                 .callbackData("image_generation")
                                 .build()
                 ))
+                .keyboardRow(new InlineKeyboardRow(
+                        InlineKeyboardButton.builder()
+                                .text("📹 Скачать видео")
+                                .callbackData("video_download")
+                                .build()
+                ))
                 .build();
 
         sender.sendWithKeyboard(message.getChatId(), """

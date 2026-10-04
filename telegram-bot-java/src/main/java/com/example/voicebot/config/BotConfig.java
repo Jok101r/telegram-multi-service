@@ -40,6 +40,17 @@ public class BotConfig {
                 .build();
     }
 
+    // Separate client for video-dl-service: downloads can take several minutes
+    @Bean("videoDlHttpClient")
+    public OkHttpClient videoDlHttpClient() {
+        return new OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(300, TimeUnit.SECONDS)
+                .writeTimeout(30, TimeUnit.SECONDS)
+                .callTimeout(320, TimeUnit.SECONDS)
+                .build();
+    }
+
     @Bean
     public ObjectMapper objectMapper() {
         return new ObjectMapper();
