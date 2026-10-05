@@ -121,9 +121,52 @@ Alternative models (replace `IMAGE_MODEL`):
 | `PROXY_URL` | _(empty)_ | Optional: `socks5://host:port` or `http://host:port` |
 | `COOKIES_FILE` | _(empty)_ | Optional: path to cookies.txt for authenticated content |
 
-Files up to **50 MB** are sent directly in Telegram. Larger files are served as a temporary download link (valid for 10 minutes by default).
+Files up to **50 MB** are sent directly in Telegram. Larger files are uploaded to storage.to and sent as a download link.
 
-To use download links on a remote server, update `PUBLIC_URL` to your server's address (e.g., `http://your-server:8002`).
+To use local download links (fallback), update `PUBLIC_URL` to your server's address (e.g., `http://your-server:8002`).
+
+### YouTube cookies (recommended)
+
+YouTube often blocks automated downloads with "Sign in to confirm you're not a bot". To fix this, extract cookies from your browser and mount them into the container.
+
+**Setup:**
+
+1. Install yt-dlp on the host machine:
+   ```bash
+   # macOS
+   brew install yt-dlp
+
+   # Linux
+   pip install yt-dlp
+   ```
+
+2. Log in to YouTube in your browser (Chrome, Firefox, Safari, Edge, etc.)
+
+3. Run the cookie extraction script:
+   ```bash
+   ./update-cookies.sh firefox   # or chrome, safari, edge, brave, etc.
+   ```
+   This creates `cookies.txt` in the project root and restarts video-dl-service if it's running.
+
+4. Verify `docker-compose.yml` has the cookies volume mounted (already configured by default):
+   ```yaml
+   video-dl-service:
+     environment:
+       - COOKIES_FILE=/cookies/cookies.txt
+     volumes:
+       - ./cookies.txt:/cookies/cookies.txt
+   ```
+
+**Automatic refresh (cron):**
+
+Cookies last 6–12 months, but setting up a daily refresh is a good idea:
+
+```bash
+# Add to crontab (runs daily at 3 AM)
+(crontab -l 2>/dev/null | grep -v "update-cookies.sh"; echo "0 3 * * * $(pwd)/update-cookies.sh firefox >> /tmp/update-cookies.log 2>&1") | crontab -
+```
+
+Replace `firefox` with your browser. The script requires the browser to have an active YouTube session — it reads the browser's cookie database directly from disk.
 
 ## Updating the bot after code changes
 
