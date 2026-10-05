@@ -1,24 +1,27 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ClaudeCodeEditorTabs">
-    <option name="activeSessionId" value="a38d1113-c168-4baf-a457-914072088ff1" />
+    <option name="activeSessionId" value="aa9fff1c-5e60-4b24-8f69-26d9e3974f8f" />
     <option name="openSessionIds">
       <list>
         <option value="476b38c2-95b2-4415-bfc1-527e2fa4181a" />
-        <option value="a38d1113-c168-4baf-a457-914072088ff1" />
+        <option value="d7c06159-25d2-4eca-bda4-6de443467814" />
+        <option value="aa9fff1c-5e60-4b24-8f69-26d9e3974f8f" />
       </list>
     </option>
     <option name="sessionPaths">
       <map>
         <entry key="476b38c2-95b2-4415-bfc1-527e2fa4181a" value="/sessions/new" />
-        <entry key="a38d1113-c168-4baf-a457-914072088ff1" value="/sessions/99ad9f24-00ff-408a-b8ff-a1f21d0a0b93" />
+        <entry key="aa9fff1c-5e60-4b24-8f69-26d9e3974f8f" value="/sessions/99ad9f24-00ff-408a-b8ff-a1f21d0a0b93" />
+        <entry key="d7c06159-25d2-4eca-bda4-6de443467814" value="/sessions/new" />
         <entry key="d99727ad-0a3f-4b2c-ba57-a1c22d995d7d" value="/sessions/434729c3-7faf-47e7-baea-d457865ba2f5" />
       </map>
     </option>
     <option name="sessionTitles">
       <map>
         <entry key="476b38c2-95b2-4415-bfc1-527e2fa4181a" value="Claude Code" />
-        <entry key="a38d1113-c168-4baf-a457-914072088ff1" value="Проанализируй подробно проект и добавь необходимые" />
+        <entry key="aa9fff1c-5e60-4b24-8f69-26d9e3974f8f" value="Проанализируй подробно проект и добавь необходимые" />
+        <entry key="d7c06159-25d2-4eca-bda4-6de443467814" value="Claude Code" />
         <entry key="d99727ad-0a3f-4b2c-ba57-a1c22d995d7d" value="нквн" />
       </map>
     </option>

@@ -27,6 +27,11 @@ services:
       - image-gen-cache:/root/.cache/huggingface   # model cache (~4 GB)
     restart: unless-stopped
 
+  pot-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    init: true
+    restart: unless-stopped
+
   video-dl-service:
     build: ./video-dl-service
     ports:
@@ -34,13 +39,17 @@ services:
     environment:
       - RATE_LIMIT_DELAY=5          # seconds between requests (anti-ban)
       - PROXY_URL=                  # optional: socks5://host:port or http://host:port
-      - COOKIES_FILE=               # optional: /cookies/cookies.txt
-      - PUBLIC_URL=http://localhost:8002  # public URL for download links (change to your server IP/domain)
+      - COOKIES_FILE=/cookies/cookies.txt
+      - POT_PROVIDER_URL=http://pot-provider:4416
+      - PUBLIC_URL=http://192.168.1.101:8002  # public URL for download links (change to your server IP/domain)
       - FILE_TTL_SECONDS=600        # how long download links stay valid (10 min)
+    depends_on:
+      - pot-provider
     volumes:
       - video-dl-cache:/root/.cache
+      - ./cookies.txt:/cookies/cookies.txt
     tmpfs:
-      - /tmp:size=2G               # temp storage for large video downloads
+      - /tmp:size=6G               # temp storage for large video downloads + FFmpeg merge
     restart: unless-stopped
 
   telegram-bot:

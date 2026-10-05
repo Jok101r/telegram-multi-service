@@ -15,7 +15,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
 
+import java.net.SocketTimeoutException;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Component
 public class VideoQualityCallback implements CallbackHandler {
@@ -60,10 +62,13 @@ public class VideoQualityCallback implements CallbackHandler {
             return;
         }
 
-        sender.sendText(chatId, "⏳ Скачиваю видео, это может занять несколько минут...");
+        Integer statusMsgId = sender.sendTextAndGetId(chatId,
+                "⏳ Скачиваю видео...\n💡 Чем больше размер, тем дольше ожидание. Большие файлы могут загружаться 5-15 минут.");
+
+        AtomicBoolean done = new AtomicBoolean(false);
+        Thread progressThread = startProgressThread(chatId, statusMsgId, done, "Скачиваю видео");
 
         try {
-            // Step 1: Call /download — returns JSON with file metadata + download link
             String json = objectMapper.writeValueAsString(Map.of(
                     "url", videoUrl,
                     "format_id", formatId
@@ -75,17 +80,19 @@ public class VideoQualityCallback implements CallbackHandler {
                     .build();
 
             try (Response response = httpClient.newCall(request).execute()) {
+                stopProgress(done, progressThread);
+
                 if (!response.isSuccessful() || response.body() == null) {
-                    String errorMsg = "Ошибка при скачивании видео.";
+                    String errorMsg = "❌ Ошибка при скачивании видео.";
                     if (response.body() != null) {
                         try {
                             var errorJson = objectMapper.readTree(response.body().string());
                             if (errorJson.has("detail")) {
-                                errorMsg = errorJson.get("detail").asText();
+                                errorMsg = "❌ " + errorJson.get("detail").asText();
                             }
                         } catch (Exception ignored) {}
                     }
-                    sender.sendText(chatId, errorMsg);
+                    editOrSend(chatId, statusMsgId, errorMsg);
                     sessionService.setState(chatId, UserState.IDLE);
                     return;
                 }
@@ -99,12 +106,13 @@ public class VideoQualityCallback implements CallbackHandler {
                 int expiresIn = result.get("expires_in_seconds").asInt();
 
                 if (fitsTelegram) {
-                    // Step 2a: File is small enough — fetch from internal URL and send via Telegram
+                    editOrSend(chatId, statusMsgId, "📤 Отправляю файл в Telegram...");
+
                     String internalUrl = videoDlUrl + result.get("internal_url").asText();
                     Request fileRequest = new Request.Builder().url(internalUrl).get().build();
                     try (Response fileResponse = httpClient.newCall(fileRequest).execute()) {
                         if (!fileResponse.isSuccessful() || fileResponse.body() == null) {
-                            sender.sendText(chatId, "Ошибка при получении файла.");
+                            editOrSend(chatId, statusMsgId, "❌ Не удалось получить скачанный файл.");
                             sessionService.setState(chatId, UserState.IDLE);
                             return;
                         }
@@ -114,25 +122,85 @@ public class VideoQualityCallback implements CallbackHandler {
                         } else {
                             sender.sendVideo(chatId, fileBytes, filename, "📹 Видео");
                         }
+                        if (statusMsgId != null) {
+                            sender.deleteMessage(chatId, statusMsgId);
+                        }
                     }
                 } else {
-                    // Step 2b: File too large for Telegram — send download link
                     long sizeMb = filesize / (1024 * 1024);
-                    int expiresMin = expiresIn / 60;
-                    String linkMessage = String.format(
-                            "📦 Файл слишком большой для Telegram (%d МБ).\n\n"
-                            + "📎 Ссылка для скачивания:\n%s\n\n"
-                            + "⏱ Ссылка действительна %d мин.",
-                            sizeMb, downloadUrl, expiresMin
-                    );
-                    sender.sendText(chatId, linkMessage);
+                    boolean isLocal = downloadUrl.contains(videoDlUrl.replace("http://", "").split("/")[0]);
+                    String linkMessage;
+                    if (isLocal) {
+                        int expiresMin = expiresIn / 60;
+                        linkMessage = String.format(
+                                "✅ Видео скачано (%d МБ).\n"
+                                + "Файл слишком большой для отправки в Telegram.\n\n"
+                                + "📎 Ссылка для скачивания:\n%s\n\n"
+                                + "⏱ Ссылка действительна %d мин.",
+                                sizeMb, downloadUrl, expiresMin
+                        );
+                    } else {
+                        linkMessage = String.format(
+                                "✅ Видео скачано (%d МБ).\n\n"
+                                + "📎 Ссылка для скачивания:\n%s",
+                                sizeMb, downloadUrl
+                        );
+                    }
+                    editOrSend(chatId, statusMsgId, linkMessage);
                 }
             }
+        } catch (SocketTimeoutException e) {
+            stopProgress(done, progressThread);
+            editOrSend(chatId, statusMsgId,
+                    "❌ Превышено время ожидания скачивания. Видео слишком большое или сервер не отвечает. Попробуйте выбрать более низкое качество.");
         } catch (Exception e) {
+            stopProgress(done, progressThread);
             e.printStackTrace();
-            sender.sendText(chatId, "Ошибка при скачивании видео, попробуйте ещё раз.");
+            editOrSend(chatId, statusMsgId,
+                    "❌ Ошибка при скачивании видео. Попробуйте ещё раз или выберите другое качество.");
         }
 
         sessionService.setState(chatId, UserState.IDLE);
+    }
+
+    private Thread startProgressThread(Long chatId, Integer msgId, AtomicBoolean done, String action) {
+        Thread thread = new Thread(() -> {
+            int elapsed = 0;
+            while (!done.get()) {
+                try {
+                    Thread.sleep(10_000);
+                } catch (InterruptedException e) {
+                    break;
+                }
+                if (done.get()) break;
+                elapsed += 10;
+                String timeStr = formatElapsed(elapsed);
+                sender.editText(chatId, msgId, "⏳ " + action + "... (" + timeStr + ")");
+            }
+        });
+        thread.setDaemon(true);
+        thread.start();
+        return thread;
+    }
+
+    private void stopProgress(AtomicBoolean done, Thread thread) {
+        done.set(true);
+        thread.interrupt();
+    }
+
+    private void editOrSend(Long chatId, Integer msgId, String text) {
+        if (msgId != null) {
+            sender.editText(chatId, msgId, text);
+        } else {
+            sender.sendText(chatId, text);
+        }
+    }
+
+    private String formatElapsed(int seconds) {
+        if (seconds < 60) return seconds + " сек";
+        int min = seconds / 60;
+        int sec = seconds % 60;
+        if (sec == 0) return min + " мин";
+        return min + " мин " + sec + " сек";
     }
 }

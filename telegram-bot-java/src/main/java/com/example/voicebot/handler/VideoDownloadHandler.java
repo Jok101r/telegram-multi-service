@@ -17,9 +17,11 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMa
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow;
 
+import java.net.SocketTimeoutException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
 @Component
@@ -60,11 +62,14 @@ public class VideoDownloadHandler implements MessageHandler {
         String url = message.getText().trim();
 
         if (!URL_PATTERN.matcher(url).matches()) {
-            sender.sendText(chatId, "Пожалуйста, отправьте корректную ссылку на видео.");
+            sender.sendText(chatId, "❌ Пожалуйста, отправьте корректную ссылку на видео.");
             return;
         }
 
-        sender.sendText(chatId, "🔍 Получаю информацию о видео...");
+        Integer statusMsgId = sender.sendTextAndGetId(chatId, "🔍 Получаю информацию о видео...");
+
+        AtomicBoolean done = new AtomicBoolean(false);
+        Thread progressThread = startProgressThread(chatId, statusMsgId, done);
 
         try {
             String json = objectMapper.writeValueAsString(Map.of("url", url));
@@ -75,17 +80,19 @@ public class VideoDownloadHandler implements MessageHandler {
                     .build();
 
             try (Response response = httpClient.newCall(request).execute()) {
+                stopProgress(done, progressThread);
+
                 if (!response.isSuccessful() || response.body() == null) {
-                    String errorMsg = "Не удалось получить информацию о видео.";
+                    String errorMsg = "❌ Не удалось получить информацию о видео.";
                     if (response.body() != null) {
                         try {
                             var errorJson = objectMapper.readTree(response.body().string());
                             if (errorJson.has("detail")) {
-                                errorMsg = errorJson.get("detail").asText();
+                                errorMsg = "❌ " + errorJson.get("detail").asText();
                             }
                         } catch (Exception ignored) {}
                     }
-                    sender.sendText(chatId, errorMsg);
+                    editOrSend(chatId, statusMsgId, errorMsg);
                     sessionService.setState(chatId, UserState.IDLE);
                     return;
                 }
@@ -95,24 +102,17 @@ public class VideoDownloadHandler implements MessageHandler {
                 JsonNode formats = info.get("formats");
 
                 if (formats == null || formats.isEmpty()) {
-                    sender.sendText(chatId, "Нет доступных форматов для скачивания.");
+                    editOrSend(chatId, statusMsgId, "❌ Нет доступных форматов для скачивания.");
                     sessionService.setState(chatId, UserState.IDLE);
                     return;
                 }
 
-                // Store URL in session for the quality callback
                 sessionService.setVideoUrl(chatId, url);
 
-                // Build quality selection keyboard
                 List<InlineKeyboardRow> rows = new ArrayList<>();
                 for (JsonNode fmt : formats) {
                     String formatId = fmt.get("format_id").asText();
                     String label = fmt.get("label").asText();
-                    boolean fits = fmt.has("fits_telegram") && fmt.get("fits_telegram").asBoolean(true);
-
-                    if (!fits) {
-                        label += " (не влезет)";
-                    }
 
                     rows.add(new InlineKeyboardRow(
                             InlineKeyboardButton.builder()
@@ -126,14 +126,67 @@ public class VideoDownloadHandler implements MessageHandler {
                         .keyboard(rows)
                         .build();
 
+                if (statusMsgId != null) {
+                    sender.deleteMessage(chatId, statusMsgId);
+                }
+
                 String text = "🎬 " + title + "\n\nВыберите качество:";
                 sender.sendWithKeyboard(chatId, text, keyboard);
                 sessionService.setState(chatId, UserState.AWAITING_VIDEO_QUALITY);
             }
+        } catch (SocketTimeoutException e) {
+            stopProgress(done, progressThread);
+            editOrSend(chatId, statusMsgId,
+                    "❌ Превышено время ожидания. Сервис не отвечает — попробуйте позже.");
+            sessionService.setState(chatId, UserState.IDLE);
         } catch (Exception e) {
+            stopProgress(done, progressThread);
             e.printStackTrace();
-            sender.sendText(chatId, "Ошибка при получении информации о видео, попробуйте ещё раз.");
+            editOrSend(chatId, statusMsgId,
+                    "❌ Не удалось получить информацию о видео. Проверьте ссылку и попробуйте ещё раз.");
             sessionService.setState(chatId, UserState.IDLE);
         }
+    }
+
+    private Thread startProgressThread(Long chatId, Integer msgId, AtomicBoolean done) {
+        Thread thread = new Thread(() -> {
+            int elapsed = 0;
+            while (!done.get()) {
+                try {
+                    Thread.sleep(10_000);
+                } catch (InterruptedException e) {
+                    break;
+                }
+                if (done.get()) break;
+                elapsed += 10;
+                String timeStr = formatElapsed(elapsed);
+                sender.editText(chatId, msgId,
+                        "🔍 Получаю информацию о видео... (" + timeStr + ")");
+            }
+        });
+        thread.setDaemon(true);
+        thread.start();
+        return thread;
+    }
+
+    private void stopProgress(AtomicBoolean done, Thread thread) {
+        done.set(true);
+        thread.interrupt();
+    }
+
+    private void editOrSend(Long chatId, Integer msgId, String text) {
+        if (msgId != null) {
+            sender.editText(chatId, msgId, text);
+        } else {
+            sender.sendText(chatId, text);
+        }
+    }
+
+    private String formatElapsed(int seconds) {
+        if (seconds < 60) return seconds + " сек";
+        int min = seconds / 60;
+        int sec = seconds % 60;
+        if (sec == 0) return min + " мин";
+        return min + " мин " + sec + " сек";
     }
 }

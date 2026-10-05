@@ -1,7 +1,11 @@
 FROM python:3.11-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg curl unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Deno — required by yt-dlp for YouTube JS player parsing
+RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
+ENV DENO_DIR=/tmp/deno
 
 WORKDIR /app
 
@@ -12,10 +16,10 @@ ENV PIP_DEFAULT_TIMEOUT=300 \
 COPY requirements.txt .
 
 # Lightweight packages first (fast cache layer)
-RUN pip install fastapi==0.115.* uvicorn[standard]==0.32.*
+RUN pip install fastapi==0.115.* uvicorn[standard]==0.32.* requests
 
-# yt-dlp separately — its own cache layer
-RUN pip install --progress-bar on yt-dlp
+# yt-dlp + PO Token plugin for YouTube anti-bot bypass
+RUN pip install --progress-bar on yt-dlp bgutil-ytdlp-pot-provider
 
 COPY app.py .
 

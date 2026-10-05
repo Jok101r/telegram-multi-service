@@ -1,5 +1,7 @@
 package com.example.voicebot.bot;
 
+import okhttp3.OkHttpClient;
+import okhttp3.Protocol;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
@@ -9,6 +11,7 @@ import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 @Component
 public class BotLifecycle implements SmartLifecycle {
@@ -28,7 +31,15 @@ public class BotLifecycle implements SmartLifecycle {
 
     @Override
     public void start() {
-        app = new TelegramBotsLongPollingApplication();
+        app = new TelegramBotsLongPollingApplication(
+                com.fasterxml.jackson.databind.ObjectMapper::new,
+                () -> new OkHttpClient.Builder()
+                        .protocols(List.of(Protocol.HTTP_1_1))
+                        .connectTimeout(30, TimeUnit.SECONDS)
+                        .readTimeout(75, TimeUnit.SECONDS)
+                        .writeTimeout(30, TimeUnit.SECONDS)
+                        .build()
+        );
         try {
             app.registerBot(botToken, bot);
             telegramClient.execute(SetMyCommands.builder()

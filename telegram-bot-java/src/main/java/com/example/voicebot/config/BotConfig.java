@@ -40,14 +40,14 @@ public class BotConfig {
                 .build();
     }
 
-    // Separate client for video-dl-service: downloads can take several minutes
+    // Separate client for video-dl-service: download + upload to file host can take 10–20 min
     @Bean("videoDlHttpClient")
     public OkHttpClient videoDlHttpClient() {
         return new OkHttpClient.Builder()
                 .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(300, TimeUnit.SECONDS)
+                .readTimeout(1800, TimeUnit.SECONDS)
                 .writeTimeout(30, TimeUnit.SECONDS)
-                .callTimeout(320, TimeUnit.SECONDS)
+                .callTimeout(1800, TimeUnit.SECONDS)
                 .build();
     }
 

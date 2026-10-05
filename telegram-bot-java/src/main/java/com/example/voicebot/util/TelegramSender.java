@@ -8,6 +8,7 @@ import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.methods.send.SendVideo;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.InputFile;
 import org.telegram.telegrambots.meta.api.objects.message.Message;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
@@ -36,6 +37,32 @@ public class TelegramSender {
             sessionService.trackMessage(chatId, sent.getMessageId());
         } catch (TelegramApiException e) {
             e.printStackTrace();
+        }
+    }
+
+    public Integer sendTextAndGetId(Long chatId, String text) {
+        try {
+            Message sent = telegramClient.execute(SendMessage.builder()
+                    .chatId(chatId)
+                    .text(text)
+                    .build());
+            sessionService.trackMessage(chatId, sent.getMessageId());
+            return sent.getMessageId();
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    public void editText(Long chatId, Integer messageId, String text) {
+        try {
+            telegramClient.execute(EditMessageText.builder()
+                    .chatId(chatId)
+                    .messageId(messageId)
+                    .text(text)
+                    .build());
+        } catch (TelegramApiException e) {
+            // ignore — message may have been deleted
         }
     }
 
@@ -80,17 +107,19 @@ public class TelegramSender {
     }
 
     public void sendVideo(Long chatId, byte[] videoBytes, String filename, String caption) {
+        String safeCaption = caption.length() > 1024 ? caption.substring(0, 1021) + "..." : caption;
         try {
             InputFile video = new InputFile(new ByteArrayInputStream(videoBytes), filename);
-            String safeCaption = caption.length() > 1024 ? caption.substring(0, 1021) + "..." : caption;
             Message sent = telegramClient.execute(SendVideo.builder()
                     .chatId(chatId)
                     .video(video)
                     .caption(safeCaption)
+                    .supportsStreaming(true)
                     .build());
             sessionService.trackMessage(chatId, sent.getMessageId());
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            // Fallback: send as document if video format is not supported by Telegram
+            sendDocument(chatId, videoBytes, filename, safeCaption);
         }
     }
 

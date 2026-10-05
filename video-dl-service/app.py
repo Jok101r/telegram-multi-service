@@ -6,6 +6,7 @@ import threading
 import tempfile
 from pathlib import Path
 
+import requests
 import yt_dlp
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -18,10 +19,13 @@ logger = logging.getLogger(__name__)
 RATE_LIMIT_DELAY = int(os.getenv("RATE_LIMIT_DELAY", "5"))
 PROXY_URL = os.getenv("PROXY_URL", "").strip() or None
 COOKIES_FILE = os.getenv("COOKIES_FILE", "").strip() or None
+POT_PROVIDER_URL = os.getenv("POT_PROVIDER_URL", "").strip() or None
 PUBLIC_URL = os.getenv("PUBLIC_URL", "http://localhost:8002").rstrip("/")
 FILE_TTL_SECONDS = int(os.getenv("FILE_TTL_SECONDS", "600"))  # 10 minutes
 
-TELEGRAM_MAX_SIZE = 50 * 1024 * 1024  # 50 MB
+TELEGRAM_MAX_SIZE = 48 * 1024 * 1024  # 48 MB (buffer for multipart overhead)
+
+STORAGE_TO_API = "https://storage.to/api/upload"
 
 DOWNLOAD_DIR = Path(tempfile.gettempdir()) / "video-dl"
 DOWNLOAD_DIR.mkdir(exist_ok=True)
@@ -31,11 +35,12 @@ _file_registry: dict[str, dict] = {}
 _registry_lock = threading.Lock()
 
 # Quality tiers in priority order
+# Prefer H.264 (avc1) — Telegram requires it for inline video playback on mobile
 QUALITY_TIERS = [
-    {"id": "best",  "label": "Лучшее",  "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"},
-    {"id": "720p",  "label": "720p",     "format": "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]"},
-    {"id": "480p",  "label": "480p",     "format": "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]"},
-    {"id": "360p",  "label": "360p",     "format": "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best[height<=360]"},
+    {"id": "best",  "label": "Лучшее",  "format": "bestvideo[vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"},
+    {"id": "720p",  "label": "720p",     "format": "bestvideo[vcodec^=avc1][height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]"},
+    {"id": "480p",  "label": "480p",     "format": "bestvideo[vcodec^=avc1][height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]"},
+    {"id": "360p",  "label": "360p",     "format": "bestvideo[vcodec^=avc1][height<=360][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best[height<=360]"},
     {"id": "audio", "label": "Только аудио", "format": "bestaudio[ext=m4a]/bestaudio"},
 ]
 
@@ -55,6 +60,11 @@ def _base_opts() -> dict:
         opts["proxy"] = PROXY_URL
     if COOKIES_FILE and os.path.isfile(COOKIES_FILE):
         opts["cookiefile"] = COOKIES_FILE
+    if POT_PROVIDER_URL:
+        opts["extractor_args"] = {
+            "youtube": [f"getpot_bgutil_baseurl={POT_PROVIDER_URL}"]
+        }
+    opts["remote_components"] = {"ejs:github"}
     return opts
 
 
@@ -63,6 +73,8 @@ def _classify_error(e: Exception) -> tuple[int, str]:
     msg = str(e).lower()
     if "private" in msg or "is not available" in msg:
         return 403, "Видео приватное или недоступно."
+    if "confirm you're not a bot" in msg or "confirm you" in msg:
+        return 403, "YouTube требует подтверждение — нужны куки из браузера (COOKIES_FILE)."
     if "age" in msg or "sign in" in msg or "login" in msg:
         return 403, "Видео требует авторизации (возрастное ограничение или приватное)."
     if "geo" in msg or "not available in your country" in msg:
@@ -72,6 +84,82 @@ def _classify_error(e: Exception) -> tuple[int, str]:
     if "unsupported" in msg or "no video" in msg:
         return 400, "Ссылка не поддерживается или не содержит видео."
     return 500, f"Ошибка при обработке видео: {e}"
+
+
+def _upload_to_filehost(file_path: Path, filename: str) -> str | None:
+    """Upload file to storage.to (up to 25 GB, no auth) and return download URL."""
+    try:
+        file_size = file_path.stat().st_size
+        ext = file_path.suffix.lstrip(".")
+        content_type = "audio/mp4" if ext == "m4a" else "video/mp4"
+
+        init = requests.post(f"{STORAGE_TO_API}/init",
+            json={"filename": filename, "size": file_size, "content_type": content_type},
+            timeout=30).json()
+        if not init.get("success"):
+            logger.warning(f"storage.to init failed: {init}")
+            return None
+
+        r2_key = init["r2_key"]
+        upload_type = init.get("type", "single")
+
+        if upload_type == "single":
+            with open(file_path, "rb") as f:
+                resp = requests.put(init["upload_url"], data=f,
+                    headers={"Content-Type": content_type}, timeout=1800)
+            resp.raise_for_status()
+        else:
+            upload_id = init["upload_id"]
+            part_size = init["part_size"]
+            part_urls = init["initial_urls"]
+            parts = []
+
+            with open(file_path, "rb") as f:
+                part_num = 1
+                while True:
+                    chunk = f.read(part_size)
+                    if not chunk:
+                        break
+                    url = part_urls.get(str(part_num))
+                    if not url:
+                        more = requests.post(f"{STORAGE_TO_API}/get-urls",
+                            json={"upload_id": upload_id, "parts": [part_num]},
+                            timeout=30).json()
+                        url = more.get("urls", {}).get(str(part_num))
+                    etag = None
+                    for attempt in range(3):
+                        try:
+                            resp = requests.put(url, data=chunk, timeout=600)
+                            resp.raise_for_status()
+                            etag = resp.headers.get("ETag", "").strip('"')
+                            break
+                        except Exception as e:
+                            logger.warning(f"storage.to: part {part_num} attempt {attempt+1} failed: {e}")
+                            if attempt == 2:
+                                raise
+                            time.sleep(2)
+                    parts.append({"partNumber": part_num, "etag": etag})
+                    logger.info(f"storage.to: uploaded part {part_num}/{init['total_parts']}")
+                    part_num += 1
+
+            requests.post(f"{STORAGE_TO_API}/complete-multipart",
+                json={"upload_id": upload_id, "parts": parts},
+                timeout=30).raise_for_status()
+
+        confirm = requests.post(f"{STORAGE_TO_API}/confirm",
+            json={"filename": filename, "size": file_size,
+                  "content_type": content_type, "r2_key": r2_key},
+            timeout=30).json()
+        if confirm.get("success"):
+            url = confirm["file"]["url"]
+            logger.info(f"Uploaded to storage.to: {url}")
+            return url
+
+        logger.warning(f"storage.to confirm failed: {confirm}")
+        return None
+    except Exception as e:
+        logger.warning(f"storage.to upload failed: {e}")
+        return None
 
 
 def _cleanup_expired_files():
@@ -221,6 +309,7 @@ def download_video(req: DownloadRequest):
     opts["format"] = tier["format"]
     opts["outtmpl"] = str(DOWNLOAD_DIR / f"{file_id}.%(ext)s")
     opts["merge_output_format"] = ext
+    opts["postprocessor_args"] = {"merger": ["-movflags", "+faststart"]}
 
     if req.format_id == "audio":
         opts["postprocessors"] = [{
@@ -250,8 +339,9 @@ def download_video(req: DownloadRequest):
     title = (info or {}).get("title", "video")
     safe_title = "".join(c if c.isalnum() or c in " -_" else "_" for c in title)[:60]
     download_name = f"{safe_title}.{actual_file.suffix.lstrip('.')}"
+    fits_telegram = file_size <= TELEGRAM_MAX_SIZE
 
-    # Register the file for serving
+    # Register the file for local serving
     with _registry_lock:
         _file_registry[file_id] = {
             "path": actual_file,
@@ -260,13 +350,24 @@ def download_video(req: DownloadRequest):
             "media_type": "audio/mp4" if req.format_id == "audio" else "video/mp4",
         }
 
-    download_url = f"{PUBLIC_URL}/files/{file_id}/{download_name}"
+    # local_url = f"{PUBLIC_URL}/files/{file_id}/{download_name}"
+    download_url = None
+
+    if not fits_telegram:
+        logger.info(f"File {file_size / 1024 / 1024:.0f} MB exceeds Telegram limit, uploading to storage.to...")
+        hosted_url = _upload_to_filehost(actual_file, download_name)
+        if hosted_url:
+            download_url = hosted_url
+        else:
+            actual_file.unlink(missing_ok=True)
+            raise HTTPException(status_code=502,
+                detail="Не удалось загрузить файл на файлообменник. Попробуйте ещё раз или выберите более низкое качество.")
 
     return {
         "file_id": file_id,
         "filename": download_name,
         "filesize": file_size,
-        "fits_telegram": file_size <= TELEGRAM_MAX_SIZE,
+        "fits_telegram": fits_telegram,
         "download_url": download_url,
         "internal_url": f"/files/{file_id}/{download_name}",
         "is_audio": req.format_id == "audio",
