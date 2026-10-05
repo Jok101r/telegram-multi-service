@@ -136,8 +136,10 @@ YouTube often blocks automated downloads with "Sign in to confirm you're not a b
    # macOS
    brew install yt-dlp
 
-   # Linux
-   pip install yt-dlp
+   # Linux (Ubuntu/Debian)
+   sudo apt install pipx && pipx install yt-dlp
+   # or
+   pip install --user yt-dlp
    ```
 
 2. Log in to YouTube in your browser (Chrome, Firefox, Safari, Edge, etc.)
@@ -162,11 +164,24 @@ YouTube often blocks automated downloads with "Sign in to confirm you're not a b
 Cookies last 6–12 months, but setting up a daily refresh is a good idea:
 
 ```bash
-# Add to crontab (runs daily at 3 AM)
+# macOS / Linux — add to crontab (runs daily at 3 AM)
 (crontab -l 2>/dev/null | grep -v "update-cookies.sh"; echo "0 3 * * * $(pwd)/update-cookies.sh firefox >> /tmp/update-cookies.log 2>&1") | crontab -
 ```
 
-Replace `firefox` with your browser. The script requires the browser to have an active YouTube session — it reads the browser's cookie database directly from disk.
+On Linux servers without a desktop browser, extract cookies on your local machine and copy the file:
+
+```bash
+# On your local machine (where the browser is)
+./update-cookies.sh firefox
+
+# Copy to the server
+scp cookies.txt user@server:/path/to/telegram-multi-service/cookies.txt
+
+# On the server — restart the service
+docker compose restart video-dl-service
+```
+
+Replace `firefox` with your browser (`chrome`, `safari`, `edge`, `brave`, etc.). The script reads the browser's cookie database directly from disk, so it must run on the machine where the browser is installed.
 
 ## Updating the bot after code changes
 
